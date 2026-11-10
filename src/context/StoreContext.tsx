@@ -56,7 +56,8 @@ interface StoreContextType {
   submitOrder: (notes?: string, couponCode?: string) => Promise<Order>;
   callWaiter: (tableId?: string, reason?: string) => void;
   dismissWaiterCall: (tableId: string) => void;
-  requestBill: (tableId: string, paymentMethod: 'pix' | 'credit_card' | 'debit_card' | 'cash') => void;
+  requestBill: (tableId: string, paymentMethod: 'pix' | 'credit_card' | 'debit_card' | 'cash', paymentLocation?: 'cashier' | 'table') => void;
+  settleTableBill: (tableId: string, paymentMethod: 'pix' | 'credit_card' | 'debit_card' | 'cash', serviceTaxAmount?: number, discountAmount?: number) => void;
   recordDwellTime: (productId: string, durationSeconds: number, incrementImpression?: boolean) => void;
   addReview: (review: Omit<CustomerReview, 'id' | 'createdAt'>) => void;
 
@@ -665,32 +666,107 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   // Request Bill
-  const requestBill = useCallback((tableId: string, paymentMethod: 'pix' | 'credit_card' | 'debit_card' | 'cash') => {
-    const table = tables.find(t => t.id === tableId);
-    const tableName = table ? table.label : 'Mesa';
+  const requestBill = useCallback(
+    (
+      tableId: string,
+      paymentMethod: 'pix' | 'credit_card' | 'debit_card' | 'cash',
+      paymentLocation: 'cashier' | 'table' = 'table'
+    ) => {
+      const table = tables.find(t => t.id === tableId);
+      const tableName = table ? table.label : 'Mesa';
 
-    setTables(prev =>
-      prev.map(t =>
-        t.id === tableId
-          ? {
-              ...t,
-              status: 'bill_requested',
-              waiterCalled: true,
-              waiterCallReason: `Conta solicitada (${paymentMethod.toUpperCase()})`,
-            }
-          : t
-      )
-    );
+      setTables(prev =>
+        prev.map(t =>
+          t.id === tableId
+            ? {
+                ...t,
+                status: 'bill_requested',
+                waiterCalled: true,
+                waiterCallReason:
+                  paymentLocation === 'cashier'
+                    ? `Cliente a caminho do Caixa (${paymentMethod.toUpperCase()})`
+                    : `Conta solicitada na Mesa (${paymentMethod.toUpperCase()})`,
+              }
+            : t
+        )
+      );
 
-    broadcast('BILL_REQUEST', { tableId, tableName, method: paymentMethod });
+      broadcast('BILL_REQUEST', { tableId, tableName, method: paymentMethod, location: paymentLocation });
 
-    triggerPushNotification({
-      target: 'customer',
-      title: '🧾 Conta Solicitada!',
-      message: `O garçom já foi avisado e trará o fechamento (${paymentMethod.toUpperCase()}) na ${tableName}.`,
-      type: 'waiter_alert',
-    });
-  }, [tables, broadcast, triggerPushNotification]);
+      if (paymentLocation === 'cashier') {
+        triggerPushNotification({
+          target: 'customer',
+          title: '🚶 Pagamento no Caixa Escolhido',
+          message: `Por favor, dirija-se ao balcão/caixa e informe sua ${tableName} para pagamento na maquininha ou dinheiro.`,
+          type: 'waiter_alert',
+        });
+      } else {
+        triggerPushNotification({
+          target: 'customer',
+          title: '🧾 Garçom Chamado!',
+          message: `O garçom já foi avisado e trará a maquininha (${paymentMethod.toUpperCase()}) até a sua ${tableName}.`,
+          type: 'waiter_alert',
+        });
+      }
+    },
+    [tables, broadcast, triggerPushNotification]
+  );
+
+  // Settle Table Bill (Used by Cashier to close open table comanda)
+  const settleTableBill = useCallback(
+    (
+      tableId: string,
+      paymentMethod: 'pix' | 'credit_card' | 'debit_card' | 'cash',
+      serviceTaxAmount: number = 0,
+      discountAmount: number = 0
+    ) => {
+      const table = tables.find(t => t.id === tableId);
+      const tableName = table ? table.label : 'Mesa';
+
+      // Mark all uncancelled/unpaid orders of this table as paid
+      setOrders(prev =>
+        prev.map(o => {
+          if (o.tableId === tableId && o.status !== 'cancelled' && o.status !== 'paid') {
+            return {
+              ...o,
+              status: 'paid' as OrderStatus,
+              paymentMethod,
+              paymentLocation: 'cashier' as const,
+              serviceTax: serviceTaxAmount > 0 ? serviceTaxAmount : o.serviceTax,
+            };
+          }
+          return o;
+        })
+      );
+
+      // Free the table
+      setTables(prev =>
+        prev.map(t =>
+          t.id === tableId
+            ? {
+                ...t,
+                status: 'free',
+                activeOrdersCount: 0,
+                totalSpent: 0,
+                waiterCalled: false,
+                waiterCallReason: undefined,
+                waiterCallTime: undefined,
+              }
+            : t
+        )
+      );
+
+      broadcast('TABLE_SETTLED', { tableId, tableName, method: paymentMethod });
+
+      triggerPushNotification({
+        target: 'all',
+        title: '✅ Mesa Fechada no Caixa!',
+        message: `Comanda da ${tableName} paga com sucesso via ${paymentMethod.toUpperCase()} e mesa liberada.`,
+        type: 'order_status',
+      });
+    },
+    [tables, broadcast, triggerPushNotification]
+  );
 
   // Update order status with customer push alerts
   const updateOrderStatus = useCallback((orderId: string, status: OrderStatus) => {
@@ -852,6 +928,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     callWaiter,
     dismissWaiterCall,
     requestBill,
+    settleTableBill,
     recordDwellTime,
     addReview,
     updateOrderStatus,

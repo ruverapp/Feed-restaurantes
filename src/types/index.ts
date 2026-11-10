@@ -37,14 +37,16 @@ export interface CustomOption {
   description?: string;
   price: number; // additional price or flavor delta
   isDefault?: boolean;
+  maxQuantity?: number;
 }
 
 export interface CustomizationGroup {
   id: string;
   name: string;
-  type: 'flavors' | 'addons' | 'options';
+  type: 'flavors' | 'addons' | 'options' | 'quantity_addons';
   min: number;
   max: number;
+  maxPerOption?: number;
   pricingRule?: PricingRule;
   options: CustomOption[];
 }
@@ -84,6 +86,13 @@ export interface SelectedAddon {
   groupId?: string;
 }
 
+export interface QuantityAddonSelection {
+  optionId: string;
+  name: string;
+  price: number;
+  quantity: number;
+}
+
 export interface CartItem {
   cartItemId: string;
   productId: string;
@@ -94,6 +103,7 @@ export interface CartItem {
   selectedFlavors?: SelectedFlavor[];
   selectedAddons?: SelectedAddon[];
   customSelections?: Record<string, { optionId: string; name: string; price: number }[]>;
+  quantitySelections?: Record<string, QuantityAddonSelection[]>;
   notes?: string;
   mediaUrl?: string;
 }
@@ -107,16 +117,22 @@ export interface Order {
   tableId: string;
   tableName: string;
   customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  deliveryAddress?: string;
+  orderType?: 'mesa' | 'delivery' | 'retirada';
   items: CartItem[];
   subtotal: number;
   discount: number;
   couponCode?: string;
   deliveryFee?: number;
+  serviceTax?: number;
   total: number;
   status: OrderStatus;
   createdAt: string; // ISO string
   notes?: string;
   paymentMethod?: 'pix' | 'credit_card' | 'debit_card' | 'cash';
+  paymentLocation?: 'cashier' | 'table';
   rated?: boolean;
 }
 
@@ -211,6 +227,6 @@ export interface Restaurant {
   monthlyFee: number;
 }
 
-export type AppViewMode = 'customer' | 'waiter' | 'merchant_admin' | 'super_admin';
+export type AppViewMode = 'customer' | 'waiter' | 'cashier' | 'merchant_admin' | 'super_admin';
 
-export type CustomerSubTab = 'reels' | 'menu' | 'bill';
+export type CustomerSubTab = 'reels' | 'menu' | 'cart';

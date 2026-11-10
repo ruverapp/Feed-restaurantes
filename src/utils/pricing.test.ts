@@ -148,3 +148,90 @@ test('calculateReviewsSummary: aggregates average rating and total counts correc
   assert.equal(summary.ratingCounts[5], 1);
   assert.equal(summary.ratingCounts[4], 1);
 });
+
+test('calculateItemUnitPrice: calculates with Type 2 quantity_addons (+ / -)', () => {
+  const customGroups: CustomizationGroup[] = [
+    {
+      id: 'grp_addons_qtd',
+      name: 'Adicionais com Quantidade',
+      type: 'quantity_addons',
+      min: 0,
+      max: 5,
+      maxPerOption: 2,
+      options: [
+        { id: 'bacon', name: 'Bacon', price: 6.0 },
+        { id: 'queijo', name: 'Queijo', price: 5.0 },
+      ],
+    },
+  ];
+
+  const quantitySelections = {
+    grp_addons_qtd: [
+      { optionId: 'bacon', name: 'Bacon', price: 6.0, quantity: 2 }, // 2 * 6 = 12
+      { optionId: 'queijo', name: 'Queijo', price: 5.0, quantity: 1 }, // 1 * 5 = 5
+    ],
+  };
+
+  // Base 50 + 12 + 5 = 67
+  const price = calculateItemUnitPrice(50, undefined, [], [], customGroups, undefined, quantitySelections);
+  assert.equal(price, 67.0);
+});
+
+test('validateGroupSelections: enforces quantity_addons max and maxPerOption limits', () => {
+  const groups: CustomizationGroup[] = [
+    {
+      id: 'grp_extras',
+      name: 'Extras',
+      type: 'quantity_addons',
+      min: 1,
+      max: 4,
+      maxPerOption: 2,
+      options: [],
+    },
+  ];
+
+  // Under minimum (0 items when min is 1)
+  const underMin = validateGroupSelections(groups, {}, { grp_extras: [] });
+  assert.equal(underMin.isValid, false);
+  assert.match(underMin.error || '', /no mínimo 1/);
+
+  // Exceeds maxPerOption (3 of same item when maxPerOption is 2)
+  const exceedsPerItem = validateGroupSelections(
+    groups,
+    {},
+    {
+      grp_extras: [{ optionId: 'bacon', name: 'Bacon', price: 5, quantity: 3 }],
+    }
+  );
+  assert.equal(exceedsPerItem.isValid, false);
+  assert.match(exceedsPerItem.error || '', /no máximo 2 unidade/);
+
+  // Exceeds group max (5 items total when max is 4)
+  const exceedsGroupMax = validateGroupSelections(
+    groups,
+    {},
+    {
+      grp_extras: [
+        { optionId: 'bacon', name: 'Bacon', price: 5, quantity: 2 },
+        { optionId: 'queijo', name: 'Queijo', price: 4, quantity: 2 },
+        { optionId: 'molho', name: 'Molho', price: 3, quantity: 1 },
+      ],
+    }
+  );
+  assert.equal(exceedsGroupMax.isValid, false);
+  assert.match(exceedsGroupMax.error || '', /no máximo 4 item/);
+
+  // Valid
+  const valid = validateGroupSelections(
+    groups,
+    {},
+    {
+      grp_extras: [
+        { optionId: 'bacon', name: 'Bacon', price: 5, quantity: 2 },
+        { optionId: 'queijo', name: 'Queijo', price: 4, quantity: 1 },
+      ],
+    }
+  );
+  assert.equal(valid.isValid, true);
+});
+

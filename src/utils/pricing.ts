@@ -1,8 +1,9 @@
-import { FlavorsConfig, SelectedFlavor, SelectedAddon, Coupon, DwellMetric, CustomizationGroup, CustomerReview } from '../types';
+import { FlavorsConfig, SelectedFlavor, SelectedAddon, Coupon, DwellMetric, CustomizationGroup, CustomerReview, QuantityAddonSelection } from '../types';
 
 /**
  * Calculates the unit price of an item given base price, flavor configuration and addons.
- * Specifically handles multi-flavor rules such as Pizza GG (up to 3 flavors with highest price rule).
+ * Specifically handles multi-flavor rules such as Pizza GG (up to 3 flavors with highest price rule)
+ * and quantity-based addons (+/- per additional item).
  */
 export function calculateItemUnitPrice(
   basePrice: number,
@@ -10,7 +11,8 @@ export function calculateItemUnitPrice(
   selectedFlavors: SelectedFlavor[] = [],
   selectedAddons: SelectedAddon[] = [],
   customGroups?: CustomizationGroup[],
-  customSelections?: Record<string, { optionId: string; name: string; price: number }[]>
+  customSelections?: Record<string, { optionId: string; name: string; price: number }[]>,
+  quantitySelections?: Record<string, QuantityAddonSelection[]>
 ): number {
   let calculatedFlavorAddition = 0;
 
@@ -40,24 +42,29 @@ export function calculateItemUnitPrice(
 
   // Additional custom groups calculation
   let customGroupsTotal = 0;
-  if (customGroups && customSelections) {
+  if (customGroups) {
     customGroups.forEach(group => {
-      const selections = customSelections[group.id] || [];
-      if (selections.length === 0) return;
+      if (group.type === 'quantity_addons') {
+        const qList = (quantitySelections && quantitySelections[group.id]) || [];
+        customGroupsTotal += qList.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 0), 0);
+      } else if (customSelections) {
+        const selections = customSelections[group.id] || [];
+        if (selections.length === 0) return;
 
-      if (group.type === 'flavors') {
-        const prices = selections.map(s => s.price || 0);
-        if (group.pricingRule === 'highest') {
-          customGroupsTotal += Math.max(...prices, 0);
-        } else if (group.pricingRule === 'average') {
-          const sum = prices.reduce((a, b) => a + b, 0);
-          customGroupsTotal += Number((sum / selections.length).toFixed(2));
+        if (group.type === 'flavors') {
+          const prices = selections.map(s => s.price || 0);
+          if (group.pricingRule === 'highest') {
+            customGroupsTotal += Math.max(...prices, 0);
+          } else if (group.pricingRule === 'average') {
+            const sum = prices.reduce((a, b) => a + b, 0);
+            customGroupsTotal += Number((sum / selections.length).toFixed(2));
+          } else {
+            customGroupsTotal += prices.reduce((a, b) => a + b, 0);
+          }
         } else {
-          customGroupsTotal += prices.reduce((a, b) => a + b, 0);
+          // Standard addons / options
+          customGroupsTotal += selections.reduce((sum, s) => sum + (s.price || 0), 0);
         }
-      } else {
-        // Standard addons / options
-        customGroupsTotal += selections.reduce((sum, s) => sum + (s.price || 0), 0);
       }
     });
   }
@@ -100,21 +107,51 @@ export function validateFlavorSelection(
  */
 export function validateGroupSelections(
   groups: CustomizationGroup[] = [],
-  selections: Record<string, { optionId: string; name: string; price: number }[]> = {}
+  selections: Record<string, { optionId: string; name: string; price: number }[]> = {},
+  quantitySelections: Record<string, QuantityAddonSelection[]> = {}
 ): { isValid: boolean; error?: string } {
   for (const group of groups) {
-    const count = (selections[group.id] || []).length;
-    if (count < group.min) {
-      return {
-        isValid: false,
-        error: `"${group.name}": Selecione no mínimo ${group.min} opção(ões). (Atual: ${count})`,
-      };
-    }
-    if (count > group.max) {
-      return {
-        isValid: false,
-        error: `"${group.name}": Selecione no máximo ${group.max} opção(ões). (Atual: ${count})`,
-      };
+    if (group.type === 'quantity_addons') {
+      const qList = quantitySelections[group.id] || [];
+      const totalQty = qList.reduce((sum, item) => sum + (item.quantity || 0), 0);
+
+      if (totalQty < group.min) {
+        return {
+          isValid: false,
+          error: `"${group.name}": Selecione no mínimo ${group.min} item(ns). (Atual: ${totalQty})`,
+        };
+      }
+      if (totalQty > group.max) {
+        return {
+          isValid: false,
+          error: `"${group.name}": Selecione no máximo ${group.max} item(ns). (Atual: ${totalQty})`,
+        };
+      }
+
+      if (group.maxPerOption) {
+        for (const item of qList) {
+          if (item.quantity > group.maxPerOption) {
+            return {
+              isValid: false,
+              error: `"${item.name}": Limite de no máximo ${group.maxPerOption} unidade(s) por adicional.`,
+            };
+          }
+        }
+      }
+    } else {
+      const count = (selections[group.id] || []).length;
+      if (count < group.min) {
+        return {
+          isValid: false,
+          error: `"${group.name}": Selecione no mínimo ${group.min} opção(ões). (Atual: ${count})`,
+        };
+      }
+      if (count > group.max) {
+        return {
+          isValid: false,
+          error: `"${group.name}": Selecione no máximo ${group.max} opção(ões). (Atual: ${count})`,
+        };
+      }
     }
   }
   return { isValid: true };

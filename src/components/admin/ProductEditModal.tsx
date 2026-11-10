@@ -62,8 +62,9 @@ export const ProductEditModal: React.FC<Props> = ({
 
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupMin, setNewGroupMin] = useState('0');
-  const [newGroupMax, setNewGroupMax] = useState('1');
-  const [newGroupType, setNewGroupType] = useState<'flavors' | 'addons' | 'options'>('addons');
+  const [newGroupMax, setNewGroupMax] = useState('3');
+  const [newGroupMaxPerOption, setNewGroupMaxPerOption] = useState('2');
+  const [newGroupType, setNewGroupType] = useState<'flavors' | 'addons' | 'options' | 'quantity_addons'>('quantity_addons');
 
   // Handle flavor actions
   const handleAddFlavor = () => {
@@ -93,6 +94,10 @@ export const ProductEditModal: React.FC<Props> = ({
       type: newGroupType,
       min: parseInt(newGroupMin, 10) || 0,
       max: parseInt(newGroupMax, 10) || 1,
+      maxPerOption:
+        newGroupType === 'quantity_addons' && newGroupMaxPerOption
+          ? parseInt(newGroupMaxPerOption, 10) || undefined
+          : undefined,
       options: [
         { id: `opt_${Date.now()}_1`, name: 'Opção 1', price: 0 },
       ],
@@ -489,6 +494,38 @@ export const ProductEditModal: React.FC<Props> = ({
                         </div>
                       </div>
                     ))}
+                    {/* Add Option inside group */}
+                    <div className="flex gap-2 pt-1 border-t border-neutral-100">
+                      <input
+                        type="text"
+                        placeholder="Novo adicional/opção"
+                        id={`new-opt-name-${grp.id}`}
+                        className="flex-1 bg-neutral-50 border border-neutral-300 rounded-lg p-1.5 text-xs text-neutral-900"
+                      />
+                      <input
+                        type="number"
+                        step="0.5"
+                        placeholder="+R$"
+                        id={`new-opt-price-${grp.id}`}
+                        className="w-20 bg-neutral-50 border border-neutral-300 rounded-lg p-1.5 text-xs text-neutral-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nameEl = document.getElementById(`new-opt-name-${grp.id}`) as HTMLInputElement;
+                          const priceEl = document.getElementById(`new-opt-price-${grp.id}`) as HTMLInputElement;
+                          if (nameEl && nameEl.value.trim()) {
+                            handleAddOptionToGroup(grp.id, nameEl.value.trim(), parseFloat(priceEl?.value || '0') || 0);
+                            nameEl.value = '';
+                            if (priceEl) priceEl.value = '';
+                          }
+                        }}
+                        className="bg-neutral-900 hover:bg-black text-white text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Add</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -497,41 +534,77 @@ export const ProductEditModal: React.FC<Props> = ({
             {/* Add New Group input */}
             <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-2">
               <span className="font-bold text-neutral-800 text-[11px]">Adicionar Novo Grupo de Opções:</span>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                <input
-                  type="text"
-                  placeholder="Nome do Grupo (ex: Borda Recheada)"
-                  value={newGroupName}
-                  onChange={e => setNewGroupName(e.target.value)}
-                  className="sm:col-span-2 bg-neutral-50 border border-neutral-300 rounded-lg p-2 text-neutral-900"
-                />
-                <div className="flex gap-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-bold text-neutral-500 block mb-1">Tipo de Adicional</label>
+                  <select
+                    value={newGroupType}
+                    onChange={e => setNewGroupType(e.target.value as any)}
+                    className="w-full bg-neutral-50 border border-neutral-300 rounded-lg p-2 text-xs font-bold text-neutral-900"
+                  >
+                    <option value="quantity_addons">Adicionais com Quantidade (+ e -)</option>
+                    <option value="addons">Seleção Simples / Múltipla (Checkbox)</option>
+                    <option value="flavors">Sabores com Regra de Maior Valor</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-neutral-500 block mb-1">Nome do Grupo</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Ingredientes Extras, Queijos..."
+                    value={newGroupName}
+                    onChange={e => setNewGroupName(e.target.value)}
+                    className="w-full bg-neutral-50 border border-neutral-300 rounded-lg p-2 text-xs text-neutral-900 font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] font-bold text-neutral-500 block mb-1">Mín. Obrigatório</label>
                   <input
                     type="number"
                     min="0"
                     placeholder="Mín"
                     value={newGroupMin}
                     onChange={e => setNewGroupMin(e.target.value)}
-                    className="w-1/2 bg-neutral-50 border border-neutral-300 rounded-lg p-2 text-neutral-900"
+                    className="w-full bg-neutral-50 border border-neutral-300 rounded-lg p-2 text-xs text-neutral-900"
                   />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-neutral-500 block mb-1">Máx. Total no Grupo</label>
                   <input
                     type="number"
                     min="1"
                     placeholder="Máx"
                     value={newGroupMax}
                     onChange={e => setNewGroupMax(e.target.value)}
-                    className="w-1/2 bg-neutral-50 border border-neutral-300 rounded-lg p-2 text-neutral-900"
+                    className="w-full bg-neutral-50 border border-neutral-300 rounded-lg p-2 text-xs text-neutral-900"
                   />
                 </div>
-                <button
-                  type="button"
-                  onClick={handleAddGroup}
-                  className="bg-neutral-900 hover:bg-black text-white font-bold px-3 py-2 rounded-lg flex items-center justify-center gap-1 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Criar Grupo
-                </button>
+                {newGroupType === 'quantity_addons' && (
+                  <div>
+                    <label className="text-[10px] font-bold text-neutral-500 block mb-1">Máx por Item</label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Ex: 2"
+                      value={newGroupMaxPerOption}
+                      onChange={e => setNewGroupMaxPerOption(e.target.value)}
+                      className="w-full bg-neutral-50 border border-neutral-300 rounded-lg p-2 text-xs text-neutral-900"
+                    />
+                  </div>
+                )}
               </div>
+
+              <button
+                type="button"
+                onClick={handleAddGroup}
+                className="w-full bg-neutral-900 hover:bg-black text-white font-bold text-xs py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer mt-1"
+              >
+                <Plus className="w-3.5 h-3.5 text-red-400" />
+                Criar Grupo de Adicionais
+              </button>
             </div>
           </div>
 

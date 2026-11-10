@@ -3,10 +3,10 @@ import { useStore } from '../../context/StoreContext';
 import { Product, CartItem } from '../../types';
 import { ReelsFeed } from './ReelsFeed';
 import { TraditionalMenu } from './TraditionalMenu';
-import { TableBillTab } from './TableBillTab';
+import { CartTab } from './CartTab';
 import { ItemCustomizerModal } from './ItemCustomizerModal';
 import { DishRatingModal } from './DishRatingModal';
-import { Film, BookOpen, Receipt, Bell, ChevronDown } from 'lucide-react';
+import { Film, BookOpen, ShoppingBag, Bell, ChevronDown } from 'lucide-react';
 
 export const CustomerView: React.FC = () => {
   const {
@@ -30,6 +30,8 @@ export const CustomerView: React.FC = () => {
   const restaurantTables = tables.filter(t => t.restaurantId === activeRestaurant.id);
   const tableOrders = orders.filter(o => o.tableId === activeTable?.id && o.restaurantId === activeRestaurant.id);
 
+  const totalCartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
   const handleOpenCustomizer = (product: Product) => {
     setSelectedProductForCustomization(product);
   };
@@ -43,8 +45,8 @@ export const CustomerView: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 h-full min-h-0 flex flex-col justify-between text-neutral-900 bg-neutral-50 overflow-hidden">
-      {/* Top Customer Header (Light Theme: White, Black, Red, Green) */}
+    <div className="flex-1 h-full min-h-0 flex flex-col justify-between text-neutral-900 bg-neutral-50 overflow-hidden font-['Plus_Jakarta_Sans',sans-serif]">
+      {/* Top Customer Header (Minimalist & Clean: White, Black, Red, Green) */}
       <header className="shrink-0 bg-white border-b border-neutral-200 px-3 sm:px-6 py-2.5 flex items-center justify-between shadow-xs z-20">
         <div className="flex items-center gap-3">
           <img
@@ -60,7 +62,7 @@ export const CustomerView: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowTableSelector(!showTableSelector)}
-              className="flex items-center gap-1 text-[11px] font-bold text-red-600 hover:text-red-700 transition-colors"
+              className="flex items-center gap-1 text-[11px] font-bold text-red-600 hover:text-red-700 transition-colors cursor-pointer"
             >
               <span>{activeTable ? activeTable.label : 'Selecione a Mesa'}</span>
               <ChevronDown className="w-3.5 h-3.5" />
@@ -73,14 +75,14 @@ export const CustomerView: React.FC = () => {
           {activeTable?.waiterCalled ? (
             <span className="text-[11px] bg-red-50 text-red-700 border border-red-300 px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 animate-pulse">
               <Bell className="w-3.5 h-3.5" />
-              <span>Garçom a caminho</span>
+              <span className="hidden xs:inline">Garçom a caminho</span>
             </span>
           ) : (
             <button
               type="button"
               onClick={() => callWaiter(activeTable?.id, 'Atendimento na mesa')}
               aria-label="Chamar Garçom"
-              className="bg-neutral-900 hover:bg-black text-white text-xs font-bold px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+              className="bg-neutral-900 hover:bg-black text-white text-xs font-bold px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
             >
               <Bell className="w-3.5 h-3.5 text-red-400" />
               <span className="hidden xs:inline">Chamar Garçom</span>
@@ -112,7 +114,7 @@ export const CustomerView: React.FC = () => {
                     setActiveTableId(tbl.id);
                     setShowTableSelector(false);
                   }}
-                  className={`p-2.5 rounded-xl border text-xs font-bold text-center transition-all ${
+                  className={`p-2.5 rounded-xl border text-xs font-bold text-center transition-all cursor-pointer ${
                     tbl.id === activeTable?.id
                       ? 'bg-red-600 border-red-600 text-white shadow-sm'
                       : 'bg-neutral-50 border-neutral-300 text-neutral-800 hover:border-black'
@@ -125,7 +127,7 @@ export const CustomerView: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowTableSelector(false)}
-              className="w-full bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-bold text-xs py-2.5 rounded-xl"
+              className="w-full bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-bold text-xs py-2.5 rounded-xl cursor-pointer"
             >
               Fechar
             </button>
@@ -133,29 +135,32 @@ export const CustomerView: React.FC = () => {
         </div>
       )}
 
-      {/* Main Tab Content */}
-      <main className="flex-1 min-h-0 overflow-y-auto w-full py-2 bg-neutral-50">
+      {/* Main Tab Content (Reels Feed, Cardápio, Carrinho) */}
+      <main className="flex-1 min-h-0 overflow-y-auto w-full py-1 bg-neutral-50">
         {customerSubTab === 'reels' && (
           <ReelsFeed onOpenCustomizer={handleOpenCustomizer} />
         )}
         {customerSubTab === 'menu' && (
           <TraditionalMenu onOpenCustomizer={handleOpenCustomizer} />
         )}
-        {customerSubTab === 'bill' && (
-          <TableBillTab onOpenRateDish={(prod) => setRatingProduct(prod)} />
+        {customerSubTab === 'cart' && (
+          <CartTab
+            onOpenRateDish={prod => setRatingProduct(prod)}
+            onGoToMenu={() => setCustomerSubTab('menu')}
+          />
         )}
       </main>
 
-      {/* Bottom Sticky Navigation Bar (Clean White, Black, Red, Green) */}
+      {/* Bottom Sticky Navigation Bar: Reels Feed, Cardápio, Carrinho */}
       <nav
         aria-label="Navegação da mesa"
-        className="shrink-0 bg-white border-t border-neutral-200 py-2.5 px-4 flex items-center justify-around max-w-lg mx-auto w-full sm:rounded-t-2xl shadow-lg z-40"
+        className="shrink-0 bg-white border-t border-neutral-200 py-2 px-4 flex items-center justify-around max-w-lg mx-auto w-full sm:rounded-t-2xl shadow-lg z-40"
       >
         {/* Reels Tab */}
         <button
           type="button"
           onClick={() => setCustomerSubTab('reels')}
-          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl transition-all relative ${
+          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl transition-all relative cursor-pointer ${
             customerSubTab === 'reels'
               ? 'text-red-600 font-black scale-105'
               : 'text-neutral-500 hover:text-neutral-900'
@@ -172,7 +177,7 @@ export const CustomerView: React.FC = () => {
         <button
           type="button"
           onClick={() => setCustomerSubTab('menu')}
-          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl transition-all ${
+          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl transition-all cursor-pointer ${
             customerSubTab === 'menu'
               ? 'text-red-600 font-black scale-105'
               : 'text-neutral-500 hover:text-neutral-900'
@@ -182,28 +187,28 @@ export const CustomerView: React.FC = () => {
           <span className="text-[11px]">Cardápio</span>
         </button>
 
-        {/* Minha Comanda / Mesa Tab */}
+        {/* Carrinho Tab (Replacing Minha Mesa) */}
         <button
           type="button"
-          onClick={() => setCustomerSubTab('bill')}
-          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl transition-all relative ${
-            customerSubTab === 'bill'
+          onClick={() => setCustomerSubTab('cart')}
+          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl transition-all relative cursor-pointer ${
+            customerSubTab === 'cart'
               ? 'text-red-600 font-black scale-105'
               : 'text-neutral-500 hover:text-neutral-900'
           }`}
         >
           <div className="relative">
-            <Receipt className="w-5 h-5" />
-            {cart.length > 0 && (
-              <span className="absolute -top-1.5 -right-2 bg-red-600 text-white font-extrabold text-[10px] w-4 h-4 rounded-full flex items-center justify-center animate-bounce">
-                {cart.length}
+            <ShoppingBag className="w-5 h-5" />
+            {totalCartCount > 0 && (
+              <span className="absolute -top-1.5 -right-2 bg-red-600 text-white font-black text-[10px] w-4 h-4 rounded-full flex items-center justify-center animate-bounce">
+                {totalCartCount}
               </span>
             )}
-            {cart.length === 0 && tableOrders.length > 0 && (
-              <span className="absolute -top-1 -right-1.5 bg-green-600 w-2 h-2 rounded-full" />
+            {totalCartCount === 0 && tableOrders.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-green-600 w-2.5 h-2.5 rounded-full" />
             )}
           </div>
-          <span className="text-[11px]">Minha Mesa</span>
+          <span className="text-[11px]">Carrinho</span>
         </button>
       </nav>
 
@@ -222,7 +227,7 @@ export const CustomerView: React.FC = () => {
           product={ratingProduct}
           table={activeTable}
           onClose={() => setRatingProduct(null)}
-          onSubmitReview={(reviewData) => {
+          onSubmitReview={reviewData => {
             if (activeRestaurant) {
               addReview({
                 ...reviewData,

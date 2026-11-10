@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Product, SelectedFlavor, SelectedAddon, CartItem, CustomOption } from '../../types';
+import { Product, SelectedFlavor, SelectedAddon, CartItem, CustomOption, QuantityAddonSelection } from '../../types';
 import { calculateItemUnitPrice, validateFlavorSelection, validateGroupSelections } from '../../utils/pricing';
 import { X, Plus, Minus, Check, AlertCircle, Sparkles, Layers } from 'lucide-react';
 
@@ -22,22 +22,36 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
   // Legacy addons
   const [selectedAddons, setSelectedAddons] = useState<SelectedAddon[]>([]);
 
-  // Advanced customization groups
+  // Advanced customization groups (Type 1: selections)
   const [customSelections, setCustomSelections] = useState<Record<string, { optionId: string; name: string; price: number }[]>>(() => {
     const initial: Record<string, { optionId: string; name: string; price: number }[]> = {};
     if (product.customizationGroups) {
       product.customizationGroups.forEach(g => {
-        const defaults = g.options.filter(o => o.isDefault).map(o => ({
-          optionId: o.id,
-          name: o.name,
-          price: o.price,
-        }));
-        if (defaults.length > 0) {
-          initial[g.id] = defaults;
-        } else if (g.min > 0 && g.options.length > 0 && g.max === 1) {
-          // Pre-select first if min is 1 and max is 1
-          initial[g.id] = [{ optionId: g.options[0].id, name: g.options[0].name, price: g.options[0].price }];
-        } else {
+        if (g.type !== 'quantity_addons') {
+          const defaults = g.options.filter(o => o.isDefault).map(o => ({
+            optionId: o.id,
+            name: o.name,
+            price: o.price,
+          }));
+          if (defaults.length > 0) {
+            initial[g.id] = defaults;
+          } else if (g.min > 0 && g.options.length > 0 && g.max === 1) {
+            initial[g.id] = [{ optionId: g.options[0].id, name: g.options[0].name, price: g.options[0].price }];
+          } else {
+            initial[g.id] = [];
+          }
+        }
+      });
+    }
+    return initial;
+  });
+
+  // Advanced customization groups (Type 2: quantity addons with + and - buttons)
+  const [quantitySelections, setQuantitySelections] = useState<Record<string, QuantityAddonSelection[]>>(() => {
+    const initial: Record<string, QuantityAddonSelection[]> = {};
+    if (product.customizationGroups) {
+      product.customizationGroups.forEach(g => {
+        if (g.type === 'quantity_addons') {
           initial[g.id] = [];
         }
       });
@@ -106,7 +120,7 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
     setValidationError(null);
   };
 
-  // Advanced group toggle
+  // Advanced group toggle (Type 1: Single/Multiple selection)
   const toggleCustomOption = (groupId: string, groupMin: number, groupMax: number, option: CustomOption) => {
     setCustomSelections(prev => {
       const current = prev[groupId] || [];
@@ -143,7 +157,67 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
     });
   };
 
-  // Current Unit Price
+  // Quantity Addon modifier (+ / - controls)
+  const changeQuantityAddon = (
+    groupId: string,
+    groupMin: number,
+    groupMax: number,
+    maxPerOption: number | undefined,
+    option: CustomOption,
+    delta: number
+  ) => {
+    setQuantitySelections(prev => {
+      const currentList = prev[groupId] || [];
+      const existing = currentList.find(item => item.optionId === option.id);
+      const currentQty = existing ? existing.quantity : 0;
+      const nextQty = Math.max(0, currentQty + delta);
+
+      // Total quantity across all options in this group
+      const totalOtherQty = currentList
+        .filter(item => item.optionId !== option.id)
+        .reduce((sum, item) => sum + item.quantity, 0);
+      const newTotal = totalOtherQty + nextQty;
+
+      if (delta > 0) {
+        if (newTotal > groupMax) {
+          setValidationError(`Limite atingido: máximo de ${groupMax} adicionais para este grupo.`);
+          return prev;
+        }
+        if (maxPerOption && nextQty > maxPerOption) {
+          setValidationError(`Limite de até ${maxPerOption}x de "${option.name}".`);
+          return prev;
+        }
+      }
+
+      setValidationError(null);
+
+      let updatedList: QuantityAddonSelection[];
+      if (nextQty === 0) {
+        updatedList = currentList.filter(item => item.optionId !== option.id);
+      } else if (existing) {
+        updatedList = currentList.map(item =>
+          item.optionId === option.id ? { ...item, quantity: nextQty } : item
+        );
+      } else {
+        updatedList = [
+          ...currentList,
+          {
+            optionId: option.id,
+            name: option.name,
+            price: option.price,
+            quantity: nextQty,
+          },
+        ];
+      }
+
+      return {
+        ...prev,
+        [groupId]: updatedList,
+      };
+    });
+  };
+
+  // Current Unit Price calculated dynamically
   const unitPrice = useMemo(() => {
     return calculateItemUnitPrice(
       product.price,
@@ -151,9 +225,10 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
       selectedFlavors,
       selectedAddons,
       product.customizationGroups,
-      customSelections
+      customSelections,
+      quantitySelections
     );
-  }, [product, selectedFlavors, selectedAddons, customSelections]);
+  }, [product, selectedFlavors, selectedAddons, customSelections, quantitySelections]);
 
   const totalPrice = Number((unitPrice * quantity).toFixed(2));
 
@@ -167,7 +242,11 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
     }
 
     if (product.customizationGroups && product.customizationGroups.length > 0) {
-      const groupValidation = validateGroupSelections(product.customizationGroups, customSelections);
+      const groupValidation = validateGroupSelections(
+        product.customizationGroups,
+        customSelections,
+        quantitySelections
+      );
       if (!groupValidation.isValid) {
         setValidationError(groupValidation.error || 'Por favor, ajuste suas seleções.');
         return;
@@ -184,6 +263,7 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
       selectedFlavors: selectedFlavors.length > 0 ? selectedFlavors : undefined,
       selectedAddons: selectedAddons.length > 0 ? selectedAddons : undefined,
       customSelections: Object.keys(customSelections).length > 0 ? customSelections : undefined,
+      quantitySelections: Object.keys(quantitySelections).length > 0 ? quantitySelections : undefined,
       notes: notes.trim() || undefined,
       mediaUrl: product.videoPoster || product.mediaUrl,
     };
@@ -197,7 +277,7 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4"
     >
       <div className="bg-white border border-neutral-200 w-full max-w-lg rounded-t-3xl sm:rounded-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-6 duration-200">
         {/* Header */}
@@ -213,7 +293,7 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
           <button
             onClick={onClose}
             aria-label="Fechar personalização"
-            className="p-2 rounded-full bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition-colors"
+            className="p-2 rounded-full bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -228,7 +308,7 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
               alt={product.name}
               className="w-full h-full object-cover"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
             <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between">
               <span className="text-xs bg-red-600 text-white font-bold px-2 py-0.5 rounded uppercase tracking-wider">
                 {product.category}
@@ -239,13 +319,9 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
             </div>
           </div>
 
-          <p className="text-xs text-neutral-600 leading-relaxed font-normal">
-            {product.description}
-          </p>
-
-          {/* Validation Error banner */}
+          {/* Validation Alert */}
           {validationError && (
-            <div className="p-3 bg-red-50 border border-red-300 rounded-xl flex items-center gap-2 text-red-700 text-xs font-semibold">
+            <div className="p-3 rounded-xl bg-red-50 border border-red-300 text-red-700 text-xs font-bold flex items-center gap-2 animate-shake">
               <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
               <span>{validationError}</span>
             </div>
@@ -255,50 +331,169 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
           {product.customizationGroups && product.customizationGroups.length > 0 && (
             <div className="space-y-4">
               {product.customizationGroups.map(group => {
-                const selections = customSelections[group.id] || [];
-                const currentCount = selections.length;
-                const isSatisfied = currentCount >= group.min && currentCount <= group.max;
+                const isQuantityType = group.type === 'quantity_addons';
+
+                if (isQuantityType) {
+                  // Type 2: Quantity addons with + and - buttons
+                  const groupSelections = quantitySelections[group.id] || [];
+                  const totalSelectedQty = groupSelections.reduce((sum, item) => sum + item.quantity, 0);
+
+                  return (
+                    <div key={group.id} className="bg-neutral-50 border border-neutral-200 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="font-black text-neutral-900 flex items-center gap-1.5 text-sm">
+                            <Plus className="w-4 h-4 text-red-600" />
+                            {group.name}
+                          </h3>
+                          <p className="text-xs text-neutral-600">
+                            {group.min > 0 ? `Mínimo: ${group.min} • ` : ''}
+                            Até {group.max} adicionais no total
+                            {group.maxPerOption ? ` (Máx ${group.maxPerOption}x por item)` : ''}
+                          </p>
+                        </div>
+                        <span
+                          className={`text-xs font-black px-2.5 py-1 rounded-full border ${
+                            totalSelectedQty >= group.min && totalSelectedQty <= group.max
+                              ? 'bg-neutral-900 text-white border-neutral-900'
+                              : 'bg-red-50 text-red-700 border-red-300'
+                          }`}
+                        >
+                          {totalSelectedQty} / {group.max}
+                        </span>
+                      </div>
+
+                      <div className="space-y-2 pt-1">
+                        {group.options.map(option => {
+                          const existingSelection = groupSelections.find(s => s.optionId === option.id);
+                          const currentOptionQty = existingSelection ? existingSelection.quantity : 0;
+                          const isMaxReached = totalSelectedQty >= group.max;
+                          const isOptionMaxReached = group.maxPerOption ? currentOptionQty >= group.maxPerOption : false;
+
+                          return (
+                            <div
+                              key={option.id}
+                              className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${
+                                currentOptionQty > 0
+                                  ? 'bg-red-50/60 border-red-500 shadow-xs'
+                                  : 'bg-white border-neutral-200 hover:border-neutral-300'
+                              }`}
+                            >
+                              <div className="flex-1">
+                                <div className="font-bold text-sm text-neutral-900 flex items-center gap-2">
+                                  <span>{option.name}</span>
+                                  {currentOptionQty > 0 && (
+                                    <span className="text-[10px] bg-red-600 text-white font-extrabold px-1.5 py-0.2 rounded-full">
+                                      {currentOptionQty}x
+                                    </span>
+                                  )}
+                                </div>
+                                {option.description && (
+                                  <p className="text-xs text-neutral-500 mt-0.5">{option.description}</p>
+                                )}
+                                <div className="text-xs font-bold text-neutral-700 mt-1">
+                                  {option.price > 0 ? (
+                                    <span className="text-red-600 font-extrabold">+R$ {option.price.toFixed(2)}/un</span>
+                                  ) : (
+                                    <span className="text-green-600 font-semibold">Grátis</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Quantity Stepper [ - ] [ count ] [ + ] */}
+                              <div className="flex items-center gap-2 shrink-0 bg-white border border-neutral-200 rounded-xl p-1 shadow-xs">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    changeQuantityAddon(
+                                      group.id,
+                                      group.min,
+                                      group.max,
+                                      group.maxPerOption,
+                                      option,
+                                      -1
+                                    )
+                                  }
+                                  disabled={currentOptionQty === 0}
+                                  aria-label={`Diminuir ${option.name}`}
+                                  className="w-8 h-8 rounded-lg bg-neutral-100 hover:bg-neutral-200 disabled:opacity-30 disabled:hover:bg-neutral-100 flex items-center justify-center font-bold text-neutral-800 transition-colors cursor-pointer"
+                                >
+                                  <Minus className="w-3.5 h-3.5" />
+                                </button>
+
+                                <span className="w-6 text-center font-black text-sm text-neutral-900">
+                                  {currentOptionQty}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    changeQuantityAddon(
+                                      group.id,
+                                      group.min,
+                                      group.max,
+                                      group.maxPerOption,
+                                      option,
+                                      1
+                                    )
+                                  }
+                                  disabled={isMaxReached || isOptionMaxReached}
+                                  aria-label={`Aumentar ${option.name}`}
+                                  className="w-8 h-8 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-30 disabled:hover:bg-red-600 text-white flex items-center justify-center font-bold transition-colors cursor-pointer shadow-xs"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Type 1: Single/Multiple Selection (Checkboxes or Radios)
+                const groupSelections = customSelections[group.id] || [];
+                const isSingleChoice = group.max === 1;
 
                 return (
                   <div key={group.id} className="bg-neutral-50 border border-neutral-200 rounded-2xl p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h3 className="font-bold text-neutral-900 flex items-center gap-1.5 text-sm">
+                        <h3 className="font-black text-neutral-900 flex items-center gap-1.5 text-sm">
                           <Layers className="w-4 h-4 text-red-600" />
                           {group.name}
                         </h3>
                         <p className="text-xs text-neutral-600">
-                          {group.min === group.max ? (
-                            `Escolha exatamente ${group.max} opção(ões)`
-                          ) : (
-                            `Selecione de ${group.min} a ${group.max} opção(ões)`
-                          )}
-                          {group.pricingRule === 'highest' && ' • Cobrado pelo maior valor'}
+                          {isSingleChoice
+                            ? 'Escolha 1 opção'
+                            : `Selecione de ${group.min} a ${group.max} opções`}
+                          {group.pricingRule === 'highest' && ' (Preço pelo maior)'}
                         </p>
                       </div>
                       <span
-                        className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${
-                          isSatisfied
-                            ? 'bg-green-100 text-green-700 border-green-300'
-                            : 'bg-red-50 text-red-600 border-red-200'
+                        className={`text-xs font-black px-2.5 py-1 rounded-full border ${
+                          groupSelections.length >= group.min && groupSelections.length <= group.max
+                            ? 'bg-neutral-900 text-white border-neutral-900'
+                            : 'bg-red-50 text-red-700 border-red-300'
                         }`}
                       >
-                        {currentCount} / {group.max}
+                        {groupSelections.length} / {group.max}
                       </span>
                     </div>
 
                     <div className="grid grid-cols-1 gap-2 pt-1">
                       {group.options.map(option => {
-                        const isChecked = selections.some(s => s.optionId === option.id);
+                        const isChecked = groupSelections.some(s => s.optionId === option.id);
                         return (
                           <button
                             key={option.id}
                             type="button"
                             onClick={() => toggleCustomOption(group.id, group.min, group.max, option)}
                             aria-pressed={isChecked}
-                            className={`w-full text-left p-3 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+                            className={`w-full text-left p-3 rounded-xl border transition-all flex items-start justify-between gap-3 cursor-pointer ${
                               isChecked
-                                ? 'bg-red-50/70 border-red-600 text-neutral-900 shadow-sm'
+                                ? 'bg-red-50/70 border-red-600 text-neutral-900 shadow-xs'
                                 : 'bg-white border-neutral-200 text-neutral-800 hover:border-neutral-400'
                             }`}
                           >
@@ -325,8 +520,8 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
                             </div>
                             <div className="text-right shrink-0">
                               {option.price > 0 ? (
-                                <span className="text-xs font-bold text-red-600">
-                                  +{option.price.toFixed(2)}
+                                <span className="text-xs font-extrabold text-red-600">
+                                  +R$ {option.price.toFixed(2)}
                                 </span>
                               ) : (
                                 <span className="text-xs font-semibold text-green-600">Incluso</span>
@@ -347,7 +542,7 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
             <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-bold text-neutral-900 flex items-center gap-1.5 text-sm">
+                  <h3 className="font-black text-neutral-900 flex items-center gap-1.5 text-sm">
                     <Sparkles className="w-4 h-4 text-red-600" />
                     Escolha os Sabores
                   </h3>
@@ -356,7 +551,7 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
                     {product.flavorsConfig.pricingRule === 'highest' && ' (Maior valor da pizza)'}
                   </p>
                 </div>
-                <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-neutral-200 text-neutral-900">
+                <span className="text-xs font-black px-2.5 py-1 rounded-full bg-neutral-900 text-white">
                   {selectedFlavors.length} / {product.flavorsConfig.maxFlavors}
                 </span>
               </div>
@@ -370,9 +565,9 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
                       type="button"
                       onClick={() => toggleFlavor(option)}
                       aria-pressed={isChecked}
-                      className={`w-full text-left p-3 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+                      className={`w-full text-left p-3 rounded-xl border transition-all flex items-start justify-between gap-3 cursor-pointer ${
                         isChecked
-                          ? 'bg-red-50 border-red-600 text-neutral-900 shadow-sm'
+                          ? 'bg-red-50 border-red-600 text-neutral-900 shadow-xs'
                           : 'bg-white border-neutral-200 text-neutral-800 hover:border-neutral-400'
                       }`}
                     >
@@ -390,7 +585,7 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
                           <div className="font-bold text-sm text-neutral-900 flex items-center gap-2">
                             <span>{option.name}</span>
                             {option.isSpecial && (
-                              <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.2 rounded font-semibold">
+                              <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.2 rounded font-bold">
                                 Especial
                               </span>
                             )}
@@ -404,8 +599,8 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
                       </div>
                       <div className="text-right shrink-0">
                         {option.priceDelta && option.priceDelta > 0 ? (
-                          <span className="text-xs font-bold text-red-600">
-                            +{option.priceDelta.toFixed(2)}
+                          <span className="text-xs font-extrabold text-red-600">
+                            +R$ {option.priceDelta.toFixed(2)}
                           </span>
                         ) : (
                           <span className="text-xs font-semibold text-green-600">Incluso</span>
@@ -425,7 +620,7 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
                 <div key={group.id} className="space-y-2">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="font-bold text-neutral-900 text-sm">{group.name}</h4>
+                      <h4 className="font-black text-neutral-900 text-sm">{group.name}</h4>
                       <p className="text-xs text-neutral-600">
                         {group.max === 1 ? 'Escolha 1 opção' : `Escolha até ${group.max} opções`}
                       </p>
@@ -441,7 +636,7 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
                           type="button"
                           onClick={() => toggleAddon(group.max, group.items, addon)}
                           aria-pressed={isSelected}
-                          className={`w-full text-left p-3 rounded-xl border transition-all flex items-center justify-between ${
+                          className={`w-full text-left p-3 rounded-xl border transition-all flex items-center justify-between cursor-pointer ${
                             isSelected
                               ? 'bg-red-50 border-red-600 text-neutral-900'
                               : 'bg-white border-neutral-200 text-neutral-800 hover:border-neutral-300'
@@ -455,11 +650,11 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
                                   : 'border-neutral-300 bg-white'
                               }`}
                             >
-                              {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                              {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
                             </div>
-                            <span className="text-xs sm:text-sm font-semibold text-neutral-900">{addon.name}</span>
+                            <span className="text-xs font-bold text-neutral-900">{addon.name}</span>
                           </div>
-                          <span className="text-xs font-bold text-neutral-900">
+                          <span className="text-xs font-extrabold text-red-600">
                             +R$ {addon.price.toFixed(2)}
                           </span>
                         </button>
@@ -470,52 +665,58 @@ export const ItemCustomizerModal: React.FC<Props> = ({ product, onClose, onAddTo
               );
             })}
 
-          {/* Observations */}
+          {/* Observações do Cliente */}
           <div className="space-y-1.5">
-            <label htmlFor="customer-notes" className="font-bold text-xs text-neutral-800">
-              Observações para a cozinha (opcional)
+            <label htmlFor="notes-input" className="font-bold text-xs text-neutral-700 block">
+              Observações para a Cozinha (Opcional):
             </label>
             <textarea
-              id="customer-notes"
-              rows={2}
+              id="notes-input"
               value={notes}
               onChange={e => setNotes(e.target.value)}
               placeholder="Ex: Sem cebola, massa bem crocante, molho à parte..."
-              className="w-full bg-white border border-neutral-300 rounded-xl p-3 text-xs text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600 transition-colors"
+              rows={2}
+              className="w-full p-3 rounded-xl border border-neutral-300 focus:outline-none focus:border-red-600 text-xs bg-neutral-50 text-neutral-900 placeholder-neutral-400"
             />
           </div>
         </div>
 
-        {/* Footer with Quantity & Add Button */}
-        <div className="p-4 border-t border-neutral-200 bg-white shrink-0 flex items-center gap-3">
-          <div className="flex items-center bg-neutral-100 border border-neutral-300 rounded-xl p-1 shrink-0">
+        {/* Footer Bar with Quantity and Add Button */}
+        <div className="p-4 border-t border-neutral-200 bg-white flex items-center justify-between gap-4 shrink-0">
+          {/* Quantity Controls */}
+          <div className="flex items-center gap-2 bg-neutral-100 rounded-xl p-1 border border-neutral-200">
             <button
               type="button"
-              onClick={() => setQuantity(q => Math.max(1, q - 1))}
+              onClick={() => setQuantity(Math.max(1, quantity - 1))}
               disabled={quantity <= 1}
               aria-label="Diminuir quantidade"
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-neutral-700 hover:bg-white disabled:opacity-30 transition-colors"
+              className="w-9 h-9 rounded-lg bg-white flex items-center justify-center text-neutral-800 disabled:opacity-40 shadow-xs hover:bg-neutral-50 transition-colors cursor-pointer"
             >
               <Minus className="w-4 h-4" />
             </button>
-            <span className="w-8 text-center font-black text-sm text-neutral-900">{quantity}</span>
+            <span className="w-7 text-center font-black text-sm text-neutral-900">
+              {quantity}
+            </span>
             <button
               type="button"
-              onClick={() => setQuantity(q => q + 1)}
+              onClick={() => setQuantity(quantity + 1)}
               aria-label="Aumentar quantidade"
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-neutral-700 hover:bg-white transition-colors"
+              className="w-9 h-9 rounded-lg bg-white flex items-center justify-center text-neutral-800 shadow-xs hover:bg-neutral-50 transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
             </button>
           </div>
 
+          {/* Add Button */}
           <button
             type="button"
             onClick={handleConfirm}
-            className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-3.5 px-4 rounded-xl flex items-center justify-between shadow-lg shadow-red-600/20 active:scale-[0.99] transition-all cursor-pointer"
+            className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-3 px-4 rounded-xl flex items-center justify-between shadow-md active:scale-98 transition-all cursor-pointer"
           >
-            <span>Adicionar à Comanda</span>
-            <span>R$ {totalPrice.toFixed(2)}</span>
+            <span>Adicionar ao Carrinho</span>
+            <span className="text-base font-extrabold bg-black/20 px-2 py-0.5 rounded-lg">
+              R$ {totalPrice.toFixed(2)}
+            </span>
           </button>
         </div>
       </div>
