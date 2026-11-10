@@ -1,0 +1,6 @@
+{
+  "name": "ReelsMenu - Cardápio Reels & SaaS para Restaurantes",
+  "description": "App de autoatendimento para mesa com feed interativo estilo Reels, métricas de tempo de visualização (dwell time), tela do garçom em tempo real e painel SaaS completo para lojistas e super admin.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
